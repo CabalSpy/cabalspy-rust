@@ -1,0 +1,33 @@
+[package]
+name = "cabalspy"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "KOL and smart money wallet tracking API for Solana, Base, BNB Chain, Ethereum and Robinhood Chain. Realtime KOL trades, whale wallets, copy-trading signals, bundle detection, token holders and PnL."
+license = "MIT"
+readme = "README.md"
+homepage = "https://docs.cabalspy.xyz"
+documentation = "https://docs.rs/cabalspy"
+repository = "https://github.com/YOUR_ORG/cabalspy-rust"
+# crates.io allows exactly five. Chosen for what someone would actually
+# search for, not for generic terms the categories already cover.
+keywords = ["kol", "solana", "memecoin", "smart-money", "wallet-tracker"]
+categories = [
+  "api-bindings",
+  "asynchronous",
+  "cryptography::cryptocurrencies",
+  "web-programming::http-client",
+]
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[features]
+default = []
