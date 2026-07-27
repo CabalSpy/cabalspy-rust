@@ -1,0 +1,11 @@
+# Build output. Never commit this, it grows to hundreds of megabytes.
+/target
+
+# Cargo.lock is deliberately NOT ignored. The Cargo team changed its guidance in
+# August 2023: commit the lockfile for libraries too, so CI and `git bisect` are
+# reproducible. Pair it with Dependabot or a scheduled `cargo update` so the
+# crate still gets tested against fresh dependencies.
+
+**/*.rs.bk
+.env
+.env.*
