@@ -198,6 +198,14 @@ dependency and cross compilation stays simple.
 
 [docs.cabalspy.xyz](https://docs.cabalspy.xyz) · free API key at [apidashboard.cabalspy.xyz](https://apidashboard.cabalspy.xyz/)
 
+## Related
+
+- [SDK overview](https://www.cabalspy.xyz/sdks/) on cabalspy.xyz · [KOL API](https://www.cabalspy.xyz/kol-api/) · [Smart Money API](https://www.cabalspy.xyz/smart-money-api/) · [use cases](https://www.cabalspy.xyz/use-cases/)
+- SDKs: [TypeScript](https://www.npmjs.com/package/cabalspy) · [Python](https://pypi.org/project/cabalspy/) · [Rust](https://crates.io/crates/cabalspy)
+- x402 clients (pay per request, no API key): [TypeScript](https://www.npmjs.com/package/cabalspy-x402) · [Python](https://pypi.org/project/cabalspy-x402/)
+- [MCP server](https://www.cabalspy.xyz/mcp/) — for Claude, Cursor and VS Code
+- [CabalSpy Terminal](https://app.cabalspy.xyz/) — trade with the same wallet data
+
 ## License
 
 MIT
