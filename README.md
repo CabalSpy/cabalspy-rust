@@ -8,7 +8,7 @@ Track what Key Opinion Leaders, smart money wallets and whales are actually buyi
 
 ```toml
 [dependencies]
-cabalspy = "0.1"
+cabalspy = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -42,6 +42,32 @@ async fn main() -> Result<(), cabalspy::Error> {
     Ok(())
 }
 ```
+
+## Try it without signing up
+
+The public demo key needs no account. `CabalSpy::demo()` uses it against the normal API:
+
+```rust
+let client = cabalspy::CabalSpy::demo()?;   // api key "demo"
+let kols = client.wallets().list(Chain::Solana, WalletType::Kol, None, None).await?;
+println!("{:?} requests left today", kols.demo.and_then(|d| d.remaining_today));
+```
+
+Or with no key at all:
+
+```bash
+curl "https://demo-api.cabalspy.xyz/v1/wallets?blockchain=solana&type=kol"
+```
+
+- 20 requests per IP per UTC day, shared between REST and websocket (each connection counts as one)
+- Data delayed by 15 minutes, at most 5 rows per list, no pagination
+- Websocket: one connection per IP, up to 3 subscriptions, closed after 30 minutes
+- Every response carries a `demo` block (`Envelope::demo`) with `remaining_today` and upgrade links
+- Once the budget is spent, requests fail with `Error::DemoLimit { resets_in_seconds, .. }`
+
+For realtime data, get a free test key (1,000 requests per month) at
+[apidashboard.cabalspy.xyz](https://apidashboard.cabalspy.xyz/), or pay per call with
+[x402](https://www.cabalspy.xyz/x402/).
 
 ## Chain coverage
 
@@ -125,12 +151,13 @@ match client.wallets().tracker(Chain::Solana, addr, None).await {
     Err(cabalspy::Error::NotFound { .. }) => println!("not tracked"),
     Err(cabalspy::Error::InsufficientCredits { .. }) => println!("top up"),
     Err(cabalspy::Error::RateLimited { retry_after, .. }) => println!("{retry_after:?}"),
+    Err(cabalspy::Error::DemoLimit { resets_in_seconds, .. }) => println!("demo resets in {resets_in_seconds:?}s"),
     Err(err) => return Err(err),
 }
 ```
 
 Every API error carries `.code()`, `.request_id()`, `.parameter()`, `.allowed()` and `.rate_limit()`.
-`429`, `5xx` and network failures are retried with exponential backoff and jitter; a server-sent
+`429` (except `DemoLimit`), `5xx` and network failures are retried with exponential backoff and jitter; a server-sent
 `Retry-After` wins over the SDK's own timing.
 
 ## Timestamps

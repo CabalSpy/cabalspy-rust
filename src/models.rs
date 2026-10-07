@@ -223,6 +223,37 @@ pub struct Envelope<T> {
     pub meta: ResponseMeta,
     pub rate_limit: crate::error::RateLimit,
     pub status: u16,
+    /// Set when the request ran on the public demo key. See [`DemoInfo`].
+    pub demo: Option<DemoInfo>,
+}
+
+/// The top-level `demo` object the API adds to every response made with the
+/// public demo key.
+///
+/// Demo data is delayed by 15 minutes and capped at 5 rows per list, and the
+/// key allows 20 requests per IP per UTC day. `remaining_today` tells you how
+/// many are left; the `X-Demo-Remaining` header fills it in if the body lacks it.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DemoInfo {
+    #[serde(default)]
+    pub notice: Option<String>,
+    #[serde(default)]
+    pub remaining_today: Option<u64>,
+    #[serde(default)]
+    pub upgrade: Option<DemoUpgrade>,
+}
+
+/// Where to go once the demo is no longer enough.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DemoUpgrade {
+    /// Free test key with 1,000 realtime requests per month.
+    #[serde(default)]
+    pub test_key: Option<String>,
+    /// Pay per call with x402, no account needed.
+    #[serde(default)]
+    pub pay_per_call: Option<String>,
+    #[serde(default)]
+    pub docs: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -232,12 +263,18 @@ pub(crate) struct RawEnvelope<T> {
     pub pagination: Option<Pagination>,
     #[serde(default)]
     pub meta: ResponseMeta,
+    /// Kept loose: error bodies send `"demo": true`, success bodies an object.
+    #[serde(default)]
+    pub demo: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct RawError {
     #[serde(default)]
     pub error: crate::error::ApiErrorBody,
+    /// Sent alongside `demo_limit_reached`.
+    #[serde(default)]
+    pub upgrade: Option<serde_json::Value>,
 }
 
 // ── shared models ────────────────────────────────────────────────────────────

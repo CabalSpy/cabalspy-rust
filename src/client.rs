@@ -6,12 +6,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
-use crate::error::{error_from_status, ApiErrorBody, Error, RateLimit, Result};
+use crate::error::{error_from_body, error_from_status, ApiErrorBody, Error, RateLimit, Result};
 use crate::models::*;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.cabalspy.xyz/v1";
 pub const DEFAULT_WS_URL: &str = "wss://stream.cabalspy.xyz";
 pub const BATCH_MAX_MINTS: usize = 100;
+/// The public demo key. Works as a normal key on REST and the websocket gateway,
+/// limited to 20 requests per IP per UTC day with 15 minute delayed data and at
+/// most 5 rows per list. See [`CabalSpy::demo`].
+pub const DEMO_API_KEY: &str = "demo";
 pub const BATCH_MAX_ADDRESSES: usize = 100;
 
 const SDK_USER_AGENT: &str = concat!("cabalspy-rust/", env!("CARGO_PKG_VERSION"));
@@ -57,6 +61,23 @@ fn backoff(attempt: u32, last: Option<&Error>) -> Duration {
     Duration::from_millis(base.min(8_000) + jitter_ms())
 }
 
+/// Reads the top-level `demo` object, falling back to the `X-Demo-Remaining`
+/// header for the remaining budget.
+fn demo_info(raw: Option<serde_json::Value>, remaining: Option<u64>) -> Option<DemoInfo> {
+    let parsed = raw.and_then(|value| serde_json::from_value::<DemoInfo>(value).ok());
+    match (parsed, remaining) {
+        (Some(mut info), remaining) => {
+            info.remaining_today = info.remaining_today.or(remaining);
+            Some(info)
+        }
+        (None, Some(remaining)) => Some(DemoInfo {
+            remaining_today: Some(remaining),
+            ..Default::default()
+        }),
+        (None, None) => None,
+    }
+}
+
 /// Rejects a chain and wallet type combination the API does not have.
 fn check_type(chain: Chain, wallet_type: WalletType) -> Result<()> {
     if chain.supports(wallet_type) {
@@ -90,6 +111,16 @@ impl CabalSpyBuilder {
     pub fn api_key(mut self, key: impl Into<String>) -> Self {
         self.api_key = Some(key.into());
         self
+    }
+
+    /// Uses the public demo key, [`DEMO_API_KEY`], instead of your own.
+    ///
+    /// Meant for trying the API without signing up: 20 requests per IP per UTC
+    /// day shared between REST and websocket, data delayed by 15 minutes, at most
+    /// 5 rows per list. When the budget is spent requests fail with
+    /// [`Error::DemoLimit`].
+    pub fn demo(self) -> Self {
+        self.api_key(DEMO_API_KEY)
     }
 
     /// REST base URL including `/v1`.
@@ -173,6 +204,30 @@ impl CabalSpy {
     /// Builds a client with an explicit API key and all other defaults.
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         CabalSpyBuilder::default().api_key(api_key).build()
+    }
+
+    /// Builds a client on the public demo key. No signup needed.
+    ///
+    /// ```no_run
+    /// # async fn run() -> Result<(), cabalspy::Error> {
+    /// use cabalspy::{CabalSpy, Chain, WalletType};
+    ///
+    /// let client = CabalSpy::demo()?;
+    /// let kols = client.wallets().list(Chain::Solana, WalletType::Kol, None, None).await?;
+    /// println!("{:?}", kols.demo.and_then(|d| d.remaining_today));
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// Limits: 20 requests per IP per UTC day, data delayed by 15 minutes, at
+    /// most 5 rows per list. For realtime data get a free test key at
+    /// <https://apidashboard.cabalspy.xyz/>, or pay per call with x402.
+    pub fn demo() -> Result<Self> {
+        CabalSpyBuilder::default().demo().build()
+    }
+
+    /// True when the client is using the public demo key.
+    pub fn is_demo(&self) -> bool {
+        self.api_key == DEMO_API_KEY
     }
 
     /// Builds a client, reading the key from `CABALSPY_API_KEY`.
@@ -279,17 +334,18 @@ impl CabalSpy {
                 reset: header_u64(response.headers(), "x-ratelimit-reset"),
             };
             let retry_after = header_u64(response.headers(), "retry-after");
+
+            let demo_remaining = header_u64(response.headers(), "x-demo-remaining");
             let text = response.text().await.unwrap_or_default();
 
             if status >= 400 {
-                let body: ApiErrorBody = serde_json::from_str::<RawError>(&text)
-                    .map(|raw| raw.error)
-                    .unwrap_or_else(|_| ApiErrorBody {
-                        code: format!("http_{status}"),
-                        message: format!("HTTP {status} on {method} {path}"),
-                        ..Default::default()
-                    });
-                let error = error_from_status(status, body, rate_limit, retry_after);
+                let error = error_from_body(
+                    status,
+                    &text,
+                    format!("HTTP {status} on {method} {path}"),
+                    rate_limit,
+                    retry_after,
+                );
                 if error.is_retryable() && attempt < self.max_retries {
                     last = Some(error);
                     continue;
@@ -307,6 +363,7 @@ impl CabalSpy {
                 meta: raw.meta,
                 rate_limit,
                 status,
+                demo: demo_info(raw.demo, demo_remaining),
             });
         }
 
@@ -890,4 +947,70 @@ fn _assert_send_sync() {
     fn assert<T: Send + Sync>() {}
     assert::<CabalSpy>();
     assert::<HashMap<String, serde_json::Value>>();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn demo_constructor_uses_the_demo_key_and_normal_hosts() {
+        let client = CabalSpy::builder()
+            .demo()
+            .base_url(DEFAULT_BASE_URL)
+            .ws_url(DEFAULT_WS_URL)
+            .build()
+            .unwrap();
+        assert!(client.is_demo());
+        assert_eq!(client.base_url(), "https://api.cabalspy.xyz/v1");
+        assert_eq!(
+            client.websocket_url(),
+            "wss://stream.cabalspy.xyz/?apiKey=demo"
+        );
+    }
+
+    #[test]
+    fn demo_shortcut_is_a_demo_client() {
+        assert!(CabalSpy::demo().unwrap().is_demo());
+        assert!(!CabalSpy::new("sk_live_x").unwrap().is_demo());
+        assert_eq!(DEMO_API_KEY, "demo");
+    }
+
+    #[test]
+    fn demo_envelope_is_parsed() {
+        let raw = r#"{
+            "success": true,
+            "data": [{"wallet_address": "abc"}],
+            "pagination": {"limit": 5, "has_more": false, "next_cursor": null},
+            "meta": {"request_id": "r1"},
+            "demo": {
+                "notice": "Demo data, delayed 15 minutes.",
+                "remaining_today": 17,
+                "upgrade": {
+                    "test_key": "https://apidashboard.cabalspy.xyz/",
+                    "pay_per_call": "https://www.cabalspy.xyz/x402/",
+                    "docs": "https://docs.cabalspy.xyz"
+                }
+            }
+        }"#;
+        let env: RawEnvelope<serde_json::Value> = serde_json::from_str(raw).unwrap();
+        let pagination = env.pagination.unwrap();
+        assert_eq!(pagination.limit, 5);
+        assert!(!pagination.has_more);
+        let info = demo_info(env.demo, Some(3)).unwrap();
+        // The body wins over the header.
+        assert_eq!(info.remaining_today, Some(17));
+        assert_eq!(
+            info.upgrade.unwrap().docs.as_deref(),
+            Some("https://docs.cabalspy.xyz")
+        );
+    }
+
+    #[test]
+    fn demo_info_falls_back_to_the_header() {
+        assert_eq!(demo_info(None, Some(4)).unwrap().remaining_today, Some(4));
+        assert!(demo_info(None, None).is_none());
+        // A non-object `demo` value does not break anything.
+        assert!(demo_info(Some(serde_json::json!(true)), None).is_none());
+    }
 }

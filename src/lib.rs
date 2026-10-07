@@ -46,6 +46,26 @@
 //! }
 //! ```
 //!
+//! ## Try it without signing up
+//!
+//! [`CabalSpy::demo`] uses the public demo key, [`DEMO_API_KEY`]. Every response
+//! then carries [`Envelope::demo`] with the remaining daily budget.
+//!
+//! ```no_run
+//! # async fn run() -> Result<(), cabalspy::Error> {
+//! use cabalspy::{CabalSpy, Chain, WalletType};
+//!
+//! let client = CabalSpy::demo()?;
+//! let kols = client.wallets().list(Chain::Solana, WalletType::Kol, None, None).await?;
+//! println!("{} left today", kols.demo.and_then(|d| d.remaining_today).unwrap_or(0));
+//! # Ok(()) }
+//! ```
+//!
+//! 20 requests per IP per UTC day shared with the websocket, data delayed by
+//! 15 minutes, at most 5 rows per list. Once spent, requests fail with
+//! [`Error::DemoLimit`]. A free test key with 1,000 realtime requests per month
+//! is at <https://apidashboard.cabalspy.xyz/>.
+//!
 //! ## Chain coverage
 //!
 //! | Chain | Identifier | Currency | Wallet types |
@@ -95,12 +115,12 @@ pub mod models;
 pub use client::{
     Analytics, Bundle, CabalSpy, CabalSpyBuilder, FeedOpts, LeaderboardOpts, Signals, SignalOpts,
     System, Tokens, Transactions, Wallets, BATCH_MAX_ADDRESSES, BATCH_MAX_MINTS, DEFAULT_BASE_URL,
-    DEFAULT_WS_URL,
+    DEFAULT_WS_URL, DEMO_API_KEY,
 };
 pub use error::{ApiErrorBody, Error, RateLimit, Result};
 pub use models::{
     ActiveTokensSummary, AnalyticsMode, BundleEntry, BundlePosition, BundleResponse, BundleWallet,
-    Chain, CountResponse, Envelope, FeedTransaction, HealthResponse, HoldingsAfter, MetaResponse,
+    Chain, CountResponse, DemoInfo, DemoUpgrade, Envelope, FeedTransaction, HealthResponse, HoldingsAfter, MetaResponse,
     Pagination, Period, PeriodStats, ResponseMeta, Signal, SignalMode, SignalTokenBlock,
     SignalWallet, SignalWindow, SignalsResponse, TokenBlock, TokenStats, TokenTrader, TotalHolders,
     TotalHoldings, TraderHoldings, TraderStats, TransactionsList, VolumeResponse, WalletProfile,
