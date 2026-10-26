@@ -113,14 +113,15 @@ pub mod error;
 pub mod models;
 
 pub use client::{
-    Analytics, Bundle, CabalSpy, CabalSpyBuilder, FeedOpts, LeaderboardOpts, Signals, SignalOpts,
+    Analytics, Bundle, CabalSpy, CabalSpyBuilder, Calls, CallsOpts, FeedOpts, LeaderboardOpts, Signals, SignalOpts,
     System, Tokens, Transactions, Wallets, BATCH_MAX_ADDRESSES, BATCH_MAX_MINTS, DEFAULT_BASE_URL,
     DEFAULT_WS_URL, DEMO_API_KEY,
 };
 pub use error::{ApiErrorBody, Error, RateLimit, Result};
 pub use models::{
-    ActiveTokensSummary, AnalyticsMode, BundleEntry, BundlePosition, BundleResponse, BundleWallet,
-    Chain, CountResponse, DemoInfo, DemoUpgrade, Envelope, FeedTransaction, HealthResponse, HoldingsAfter, MetaResponse,
+    ActiveTokensSummary, AnalyticsMode, BestCall, BundleEntry, BundlePosition, BundleResponse, BundleWallet,
+    Call, CallPerformance, CallStatsBlock, CallStatsPeriod, CallStatsResponse, CallTier, CallToken,
+    CallTrigger, CallWallet, Chain, CountResponse, DemoInfo, DemoUpgrade, Envelope, FeedTransaction, HealthResponse, HoldingsAfter, MetaResponse,
     Pagination, Period, PeriodStats, ResponseMeta, Signal, SignalMode, SignalTokenBlock,
     SignalWallet, SignalWindow, SignalsResponse, TokenBlock, TokenStats, TokenTrader, TotalHolders,
     TotalHoldings, TraderHoldings, TraderStats, TransactionsList, VolumeResponse, WalletProfile,
@@ -246,5 +247,47 @@ mod tests {
         assert!(stats.traders.is_empty());
         // Unknown fields are kept rather than dropped.
         assert!(stats.extra.contains_key("some_field_added_later"));
+    }
+
+    #[test]
+    fn calls_are_parsed() {
+        let raw = r#"[{
+            "call_id": "c_0123456789ab", "blockchain": "solana", "tier": "moderate",
+            "tier_label": "Moderate Gamble", "called_at": "2026-10-01T12:00:00Z",
+            "token": {"mint": "Mint1", "symbol": "EX", "name": "Example", "logo": null},
+            "market_cap_at_call": 25000.0,
+            "trigger": {"kol_count": 2, "smart_count": 1, "native_symbol": "SOL", "total_native": 9.5,
+                        "wallets": [{"address": "W1", "type": "kol", "name": "", "amount_native": 6.0, "bought_at": null}]},
+            "performance": {"status": "pending", "peak_multiple": null},
+            "links": {"terminal": "https://app.cabalspy.xyz/token/Mint1"},
+            "timestamp": "2026-10-01T12:00:00Z"
+        }]"#;
+        let calls: Vec<Call> = serde_json::from_str(raw).unwrap();
+        assert_eq!(calls[0].tier, Some(CallTier::Moderate));
+        assert_eq!(calls[0].trigger.wallets[0].wallet_type, Some(WalletType::Kol));
+        assert_eq!(calls[0].performance.as_ref().unwrap().status.as_deref(), Some("pending"));
+        assert!(calls[0].extra.contains_key("timestamp"));
+        assert_eq!(CallTier::Whale.as_str(), "whale");
+        assert_eq!(CallStatsPeriod::D90.as_str(), "90d");
+    }
+
+    #[test]
+    fn a_null_total_does_not_break_pagination() {
+        let p: Pagination = serde_json::from_str(r#"{"limit": 50, "total": null, "has_more": true, "next_cursor": "x"}"#).unwrap();
+        assert_eq!(p.total, 0);
+        assert!(p.has_more);
+    }
+
+    #[test]
+    fn call_stats_are_parsed() {
+        let raw = r#"{"period": "7d", "totals": {"calls": 120, "evaluated": 112,
+                      "hit_rate": {"2x": 45.5, "5x": null}, "median_peak_multiple": 1.9},
+                      "chains": {"solana": {"calls": 120, "tiers": {"gamble": {"calls": 80}}}},
+                      "best_calls": [{"call_id": "c_1", "mint": "M", "peak_multiple": 12.0}]}"#;
+        let s: CallStatsResponse = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.totals.hit_rate["2x"], Some(45.5));
+        assert_eq!(s.totals.hit_rate["5x"], None);
+        assert_eq!(s.chains["solana"].tiers["gamble"].calls, 80);
+        assert_eq!(s.best_calls[0].peak_multiple, Some(12.0));
     }
 }

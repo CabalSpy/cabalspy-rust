@@ -2,13 +2,13 @@
 
 Official Rust client for the **CabalSpy API**: a realtime multichain data layer for labeled wallets, covering **Solana, Base, BNB Chain, Ethereum and Robinhood Chain**.
 
-Track what Key Opinion Leaders, smart money wallets and whales are actually buying — with PnL, holder data, cluster signals and bundle detection.
+Track what Key Opinion Leaders, smart money wallets and whales are actually buying — with PnL, holder data, cluster signals, bundle detection and our curated calls.
 
 **What you can build with it:** copy-trading bots, KOL leaderboards, memecoin alert systems, wallet analytics dashboards, bundle and sniper detection, portfolio and PnL trackers.
 
 ```toml
 [dependencies]
-cabalspy = "0.2"
+cabalspy = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -142,6 +142,33 @@ let volume = client.transactions()
 >
 > The gateway populates them on every chain, and unlike REST it does not zero the unrealized
 > values once a position is fully sold.
+
+## Calls
+
+The curated CabalSpy calls, the same ones posted in Discord, with the wallets behind each call and
+how it performed over the 24 hours after it. Chains `Solana`, `Bnb`, `Eth` and `Rh` (Base has none);
+tiers `Gamble`, `Moderate`, `Good`, `Big` and `Whale` (the last two on Solana only).
+
+```rust
+use cabalspy::{CallStatsPeriod, CallTier, CallsOpts, Chain};
+
+let calls = client.calls().list(CallsOpts {
+    chains: vec![Chain::Solana],
+    tiers: vec![CallTier::Good, CallTier::Moderate],
+    ..Default::default()
+}).await?;
+for call in &calls.data {
+    let peak = call.performance.as_ref().and_then(|p| p.peak_multiple);
+    println!("{:?} {:?} peak {:?}", call.tier_label, call.token.symbol, peak);
+}
+
+let stats = client.calls().stats(Some(CallStatsPeriod::D30), &[], &[]).await?;
+println!("{:?} % reached 2x", stats.data.totals.hit_rate.get("2x"));
+```
+
+`performance.status` is `"pending"` for about two days, until the call has been measured. Older
+calls are on the next page, via `pagination.next_cursor`. For calls as they happen, subscribe to
+`{"op":"subscribe","stream":"call"}` on the websocket gateway.
 
 ## Errors
 

@@ -268,6 +268,9 @@ impl CabalSpy {
     pub fn analytics(&self) -> Analytics<'_> {
         Analytics { client: self }
     }
+    pub fn calls(&self) -> Calls<'_> {
+        Calls { client: self }
+    }
     pub fn bundle(&self) -> Bundle<'_> {
         Bundle { client: self }
     }
@@ -480,6 +483,37 @@ impl SignalOpts {
         push_opt(query, "min_win_rate", self.min_win_rate);
         push_opt(query, "min_token_age", self.min_token_age);
         push_opt(query, "max_token_age", self.max_token_age);
+    }
+}
+
+/// Optional parameters for [`Calls::list`].
+#[derive(Debug, Clone, Default)]
+pub struct CallsOpts {
+    /// Empty for every chain. Base has no calls.
+    pub chains: Vec<Chain>,
+    /// Empty for every tier.
+    pub tiers: Vec<CallTier>,
+    /// ISO 8601 or Unix seconds.
+    pub since: Option<String>,
+    pub until: Option<String>,
+    /// 1 to 200. Server default 50.
+    pub limit: Option<u32>,
+    pub cursor: Option<String>,
+}
+
+fn check_call_chains(chains: &[Chain]) -> Result<()> {
+    if chains.contains(&Chain::Base) {
+        return Err(Error::InvalidRequest {
+            message: "base has no calls; calls cover solana, bnb, eth and rh".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn push_list<T: ToString>(query: &mut Query, key: &str, values: &[T]) {
+    if !values.is_empty() {
+        let joined: Vec<String> = values.iter().map(|v| v.to_string()).collect();
+        push(query, key, joined.join(","));
     }
 }
 
@@ -938,6 +972,45 @@ impl Bundle<'_> {
         push(&mut query, "blockchain", Chain::Solana);
         push(&mut query, "mint", mint);
         self.client.get("/bundle", query).await
+    }
+}
+
+/// The curated CabalSpy calls, the same ones posted in Discord.
+#[derive(Debug)]
+pub struct Calls<'a> {
+    client: &'a CabalSpy,
+}
+
+impl Calls<'_> {
+    /// `GET /v1/calls` — newest first, each with its 24 h performance.
+    ///
+    /// `performance.status` is `pending` for about two days, until the call has
+    /// been measured. Follow `pagination.next_cursor` for older calls.
+    pub async fn list(&self, opts: CallsOpts) -> Result<Envelope<Vec<Call>>> {
+        check_call_chains(&opts.chains)?;
+        let mut query = Query::new();
+        push_list(&mut query, "blockchain", &opts.chains);
+        push_list(&mut query, "tier", &opts.tiers);
+        push_opt(&mut query, "since", opts.since);
+        push_opt(&mut query, "until", opts.until);
+        push_opt(&mut query, "limit", opts.limit);
+        push_opt(&mut query, "cursor", opts.cursor);
+        self.client.get("/calls", query).await
+    }
+
+    /// `GET /v1/calls/stats` — hit rates (2x, 5x, 10x within 24 h) per chain and tier.
+    pub async fn stats(
+        &self,
+        period: Option<CallStatsPeriod>,
+        chains: &[Chain],
+        tiers: &[CallTier],
+    ) -> Result<Envelope<CallStatsResponse>> {
+        check_call_chains(chains)?;
+        let mut query = Query::new();
+        push_opt(&mut query, "period", period);
+        push_list(&mut query, "blockchain", chains);
+        push_list(&mut query, "tier", tiers);
+        self.client.get("/calls/stats", query).await
     }
 }
 

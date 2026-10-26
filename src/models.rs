@@ -184,6 +184,79 @@ impl AnalyticsMode {
     }
 }
 
+/// A tier of the curated calls. `Big` and `Whale` exist on Solana only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CallTier {
+    /// "Gambles"
+    Gamble,
+    /// "Moderate Gamble"
+    Moderate,
+    /// "Good Token"
+    Good,
+    /// "Big Token"
+    Big,
+    /// "Whales Call"
+    Whale,
+}
+
+impl CallTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CallTier::Gamble => "gamble",
+            CallTier::Moderate => "moderate",
+            CallTier::Good => "good",
+            CallTier::Big => "big",
+            CallTier::Whale => "whale",
+        }
+    }
+}
+
+impl fmt::Display for CallTier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// The window of [`crate::Calls::stats`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CallStatsPeriod {
+    #[serde(rename = "1d")]
+    D1,
+    #[serde(rename = "7d")]
+    D7,
+    #[serde(rename = "30d")]
+    D30,
+    #[serde(rename = "90d")]
+    D90,
+}
+
+impl CallStatsPeriod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CallStatsPeriod::D1 => "1d",
+            CallStatsPeriod::D7 => "7d",
+            CallStatsPeriod::D30 => "30d",
+            CallStatsPeriod::D90 => "90d",
+        }
+    }
+}
+
+impl fmt::Display for CallStatsPeriod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Reads `null` as the type's default instead of failing.
+fn null_as_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 // ── envelope ─────────────────────────────────────────────────────────────────
 
 /// Metadata attached to every successful response.
@@ -207,7 +280,8 @@ pub struct ResponseMeta {
 pub struct Pagination {
     #[serde(default)]
     pub limit: i64,
-    #[serde(default)]
+    /// 0 when the server reports no total (`null`, for example `/v1/calls` with a tier filter).
+    #[serde(default, deserialize_with = "null_as_default")]
     pub total: i64,
     #[serde(default)]
     pub has_more: bool,
@@ -912,6 +986,164 @@ pub struct BundleResponse {
     pub token: TokenBlock,
     #[serde(default)]
     pub bundles: Vec<BundleEntry>,
+}
+
+// ── calls ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CallToken {
+    #[serde(default)]
+    pub mint: String,
+    #[serde(default)]
+    pub symbol: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub logo: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CallWallet {
+    #[serde(default)]
+    pub address: String,
+    /// `kol` or `smart`.
+    #[serde(default, rename = "type")]
+    pub wallet_type: Option<WalletType>,
+    /// Profile name, empty when unknown.
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub amount_native: Option<f64>,
+    #[serde(default)]
+    pub bought_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CallTrigger {
+    #[serde(default)]
+    pub kol_count: Option<i64>,
+    #[serde(default)]
+    pub smart_count: Option<i64>,
+    #[serde(default)]
+    pub native_symbol: Option<String>,
+    #[serde(default)]
+    pub total_native: Option<f64>,
+    /// Empty on Big Token calls, which carry counts only.
+    #[serde(default)]
+    pub wallets: Vec<CallWallet>,
+}
+
+/// How a call did over the 24 hours after it.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CallPerformance {
+    /// `pending` (younger than about two days), `ok`, `no_data` or `not_evaluated`.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Highest price within 24 h after the call, divided by the price at the call.
+    #[serde(default)]
+    pub peak_multiple: Option<f64>,
+    #[serde(default)]
+    pub peak_market_cap: Option<f64>,
+    #[serde(default)]
+    pub minutes_to_peak: Option<i64>,
+    /// Price 24 h after the call, divided by the price at the call.
+    #[serde(default)]
+    pub close_24h_multiple: Option<f64>,
+    #[serde(default)]
+    pub evaluated_at: Option<String>,
+}
+
+/// One curated call, the same as posted in the CabalSpy Discord.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Call {
+    /// Stable id, the same in REST and on the call stream.
+    #[serde(default)]
+    pub call_id: String,
+    #[serde(default)]
+    pub blockchain: Option<Chain>,
+    #[serde(default)]
+    pub tier: Option<CallTier>,
+    /// As shown in Discord, for example `"Moderate Gamble"`.
+    #[serde(default)]
+    pub tier_label: Option<String>,
+    /// RFC 3339, UTC.
+    #[serde(default)]
+    pub called_at: Option<String>,
+    #[serde(default)]
+    pub token: CallToken,
+    /// USD.
+    #[serde(default)]
+    pub market_cap_at_call: Option<f64>,
+    #[serde(default)]
+    pub trigger: CallTrigger,
+    /// Trading and chart links. Solana calls include `terminal`, the CabalSpy Terminal page.
+    #[serde(default)]
+    pub links: HashMap<String, String>,
+    #[serde(default)]
+    pub performance: Option<CallPerformance>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// One block of [`CallStatsResponse`]: totals, a chain or a tier.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CallStatsBlock {
+    #[serde(default)]
+    pub calls: i64,
+    #[serde(default)]
+    pub evaluated: i64,
+    #[serde(default)]
+    pub pending: i64,
+    #[serde(default)]
+    pub no_data: i64,
+    #[serde(default)]
+    pub not_evaluated: i64,
+    /// Percent of evaluated calls per level (`"2x"`, `"5x"`, `"10x"`), `None` when nothing was evaluated.
+    #[serde(default)]
+    pub hit_rate: HashMap<String, Option<f64>>,
+    #[serde(default)]
+    pub median_peak_multiple: Option<f64>,
+    #[serde(default)]
+    pub median_minutes_to_peak: Option<f64>,
+    /// Per tier, only inside `chains`.
+    #[serde(default)]
+    pub tiers: HashMap<String, CallStatsBlock>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct BestCall {
+    #[serde(default)]
+    pub call_id: String,
+    #[serde(default)]
+    pub blockchain: Option<Chain>,
+    #[serde(default)]
+    pub tier: Option<CallTier>,
+    #[serde(default)]
+    pub symbol: Option<String>,
+    #[serde(default)]
+    pub mint: String,
+    #[serde(default)]
+    pub called_at: Option<String>,
+    #[serde(default)]
+    pub market_cap_at_call: Option<f64>,
+    #[serde(default)]
+    pub peak_multiple: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CallStatsResponse {
+    #[serde(default)]
+    pub period: Option<String>,
+    #[serde(default)]
+    pub window: HashMap<String, String>,
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub totals: CallStatsBlock,
+    #[serde(default)]
+    pub chains: HashMap<String, CallStatsBlock>,
+    #[serde(default)]
+    pub best_calls: Vec<BestCall>,
 }
 
 // ── system ───────────────────────────────────────────────────────────────────
