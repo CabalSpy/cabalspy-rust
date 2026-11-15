@@ -170,6 +170,26 @@ println!("{:?} % reached 2x", stats.data.totals.hit_rate.get("2x"));
 calls are on the next page, via `pagination.next_cursor`. For calls as they happen, subscribe to
 `{"op":"subscribe","stream":"call"}` on the websocket gateway.
 
+## Polling a token's trades
+
+`transactions_with` takes a `since` time and returns only the trades from then on. A poll that
+finds no new trade costs 0 credits. The bound is inclusive, so deduplicate by `tx_signature`.
+`transactions_with` and `holders_with` also take `cursor` for paging.
+
+```rust
+use cabalspy::{Chain, TokenOpts};
+
+let page = client.tokens()
+    .transactions_with(Chain::Solana, mint, TokenOpts {
+        since: Some(last_created_at.clone()),
+        ..Default::default()
+    })
+    .await?;
+```
+
+Market cap and price are filled on every chain; `market_cap_source` says whether the value is
+live or taken from the last tracked trade.
+
 ## Errors
 
 ```rust

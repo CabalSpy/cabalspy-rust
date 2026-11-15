@@ -114,7 +114,7 @@ pub mod models;
 
 pub use client::{
     Analytics, Bundle, CabalSpy, CabalSpyBuilder, Calls, CallsOpts, FeedOpts, LeaderboardOpts, Signals, SignalOpts,
-    System, Tokens, Transactions, Wallets, BATCH_MAX_ADDRESSES, BATCH_MAX_MINTS, DEFAULT_BASE_URL,
+    System, TokenOpts, Tokens, Transactions, Wallets, BATCH_MAX_ADDRESSES, BATCH_MAX_MINTS, DEFAULT_BASE_URL,
     DEFAULT_WS_URL, DEMO_API_KEY,
 };
 pub use error::{ApiErrorBody, Error, RateLimit, Result};

@@ -486,6 +486,22 @@ impl SignalOpts {
     }
 }
 
+/// Optional parameters for [`Tokens::transactions_with`] and [`Tokens::holders_with`].
+#[derive(Debug, Clone, Default)]
+pub struct TokenOpts {
+    /// Restrict to one wallet type. `None` merges every type of the chain.
+    pub wallet_type: Option<WalletType>,
+    pub limit: Option<u32>,
+    /// `pagination.next_cursor` of the previous page, sent with the same limit.
+    pub cursor: Option<String>,
+    /// Transactions only: trades at or after this time (Unix seconds, Unix
+    /// milliseconds or ISO 8601 in UTC). Usually the `created_at` of the newest
+    /// trade you already have. A poll that finds nothing new costs 0 credits.
+    /// The bound is inclusive, so deduplicate by `tx_signature`. Ignored by
+    /// `holders_with`.
+    pub since: Option<String>,
+}
+
 /// Optional parameters for [`Calls::list`].
 #[derive(Debug, Clone, Default)]
 pub struct CallsOpts {
@@ -716,6 +732,19 @@ impl Wallets<'_> {
     }
 }
 
+fn token_query(chain: Chain, mint: &str, opts: &TokenOpts) -> Result<Query> {
+    if let Some(wallet_type) = opts.wallet_type {
+        check_type(chain, wallet_type)?;
+    }
+    let mut query = Query::new();
+    push(&mut query, "blockchain", chain);
+    push(&mut query, "mint", mint);
+    push_opt(&mut query, "type", opts.wallet_type);
+    push_opt(&mut query, "limit", opts.limit);
+    push_opt(&mut query, "cursor", opts.cursor.clone());
+    Ok(query)
+}
+
 /// Token endpoints.
 #[derive(Debug)]
 pub struct Tokens<'a> {
@@ -742,13 +771,37 @@ impl Tokens<'_> {
         self.client.get("/tokens/transactions", query).await
     }
 
+    /// `GET /v1/tokens/transactions` with paging and polling: see [`TokenOpts`].
+    ///
+    /// Poll with `since` to get only new trades, then follow
+    /// `pagination.next_cursor` with `cursor`.
+    pub async fn transactions_with(
+        &self,
+        chain: Chain,
+        mint: &str,
+        opts: TokenOpts,
+    ) -> Result<Envelope<serde_json::Value>> {
+        let mut query = token_query(chain, mint, &opts)?;
+        push_opt(&mut query, "since", opts.since);
+        self.client.get("/tokens/transactions", query).await
+    }
+
+    /// `GET /v1/tokens/holders` with paging: see [`TokenOpts`] (`since` is ignored).
+    pub async fn holders_with(
+        &self,
+        chain: Chain,
+        mint: &str,
+        opts: TokenOpts,
+    ) -> Result<Envelope<serde_json::Value>> {
+        let query = token_query(chain, mint, &opts)?;
+        self.client.get("/tokens/holders", query).await
+    }
+
     /// `GET /v1/tokens/stats` — aggregated token statistics.
     ///
     /// Passing `None` for the wallet type merges every type of that chain.
-    ///
-    /// Note that this endpoint does not pass the native price into its market cap
-    /// builder, so `market_cap_usd`, `price_usd` and `sol_price_usd` come back
-    /// `None` even on Solana. `holders` returns them populated.
+    /// Market cap and price are filled on every chain; `market_cap_source` says
+    /// whether the value is live or taken from the last tracked trade.
     pub async fn stats(
         &self,
         chain: Chain,
@@ -1040,6 +1093,22 @@ mod tests {
             client.websocket_url(),
             "wss://stream.cabalspy.xyz/?apiKey=demo"
         );
+    }
+
+    #[test]
+    fn token_query_carries_cursor_and_type() {
+        let opts = TokenOpts {
+            wallet_type: Some(WalletType::Kol),
+            limit: Some(50),
+            cursor: Some("c1".to_string()),
+            since: Some("2026-11-04T00:00:00Z".to_string()),
+        };
+        let query = token_query(Chain::Solana, "m", &opts).unwrap();
+        let get = |k: &str| query.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
+        assert_eq!(get("cursor").as_deref(), Some("c1"));
+        assert_eq!(get("limit").as_deref(), Some("50"));
+        assert_eq!(get("type").as_deref(), Some("kol"));
+        assert_eq!(get("since"), None, "since is added by transactions_with only");
     }
 
     #[test]
